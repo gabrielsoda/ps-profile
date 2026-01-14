@@ -12,6 +12,59 @@ Import-Module PSReadLine
 Set-PSReadLineKeyHandler -Key Tab -Function TabCompleteNext
 Set-PSReadLineOption -PredictionViewStyle ListView
 
+# OPCIONAL: Historial mejorado de PSReadLine
+Set-PSReadLineOption -HistorySearchCursorMovesToEnd
+Set-PSReadLineKeyHandler -Key UpArrow -Function HistorySearchBackward
+Set-PSReadLineKeyHandler -Key DownArrow -Function HistorySearchForward
+
+# Buscar archivos y abrirlos con VSCode
+function fzf-code {
+    $file = fzf
+    if ($file) { code $file }
+}
+Set-Alias fzc fzf-code
+
+# Buscar en historial de comandos con Ctrl+R
+Set-PSReadLineKeyHandler -Key Ctrl+r -ScriptBlock {
+    $command = Get-Content (Get-PSReadLineOption).HistorySavePath | fzf
+    if ($command) {
+        [Microsoft.PowerShell.PSConsoleReadLine]::Insert($command)
+    }
+}
+
+# Navegar a carpetas rápidamente
+function fzf-cd {
+    $dir = Get-ChildItem -Directory -Recurse -Depth 3 | Select-Object -ExpandProperty FullName | fzf
+    if ($dir) { Set-Location $dir }
+}
+Set-Alias fzcd fzf-cd
+
+# Función para descargar videos de YouTube usando yt_dlp
+function yt {
+    param($url)
+    python -c @"
+import yt_dlp
+import sys
+
+url = sys.argv[1]
+ydl_opts = {
+    'format': 'bestvideo+bestaudio/best',
+    'outtmpl': '%(title)s-%(id)s.%(ext)s',
+}
+
+try:
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
+    print('¡Descarga completa!')
+except Exception as e:
+    print(f'Ocurrió un error: {e}')
+"@ $url
+}
+
+Set-Alias -Name yt -Value yt
+
+
+
 # Función para WhisperX con alias wtxt (corregida para venv en whisperx-env)
 function WhisperTxt {
     param (
@@ -263,104 +316,109 @@ function MuxSubs {
         [string]$Title = "Custom Subs"
     )
 
-    # --- HELPER FUNCTION TO SANITIZE PATHS ---
+    # --- HELPER: CLEAN PATHS ---
     function Get-CleanPath {
         param ($Path)
-        # 1. Try the path exactly as given
-        if (Test-Path -LiteralPath $Path) {
-            return (Convert-Path -LiteralPath $Path)
-        }
-        # 2. If failed, try removing backticks (Fix for single-quoted tab-completions)
-        $Sanitized = $Path.Replace('`', '')
-        if (Test-Path -LiteralPath $Sanitized) {
-            return (Convert-Path -LiteralPath $Sanitized)
-        }
-        # 3. Fail
+        $Sanitized = $Path.Replace('`', '') 
+        if (Test-Path -LiteralPath $Sanitized) { return (Convert-Path -LiteralPath $Sanitized) }
         return $null
     }
 
-    # 1. CLEAN & RESOLVE PATHS
+    # 1. VALIDATE INPUTS
     $RealVideoPath = Get-CleanPath -Path $VideoFile
-    if (-not $RealVideoPath) { 
-        Write-Host "✗ Error: Video not found: $VideoFile" -ForegroundColor Red; return 
-    }
-
     $RealSubPath = Get-CleanPath -Path $SubtitleFile
-    if (-not $RealSubPath) { 
-        Write-Host "✗ Error: Subtitle not found: $SubtitleFile" -ForegroundColor Red; return 
+
+    if (-not $RealVideoPath -or -not $RealSubPath) { 
+        Write-Host "✗ Error: Archivos no encontrados." -ForegroundColor Red; return 
     }
 
-    # 2. Smart Output Naming
+    # 2. SMART OUTPUT NAMING
     if (-not $OutputFile) {
         $baseName = [System.IO.Path]::GetFileNameWithoutExtension($RealVideoPath)
+        # Evitar recursividad en el nombre (ej: _subs_subs)
+        if ($baseName.EndsWith("_subs")) {
+            $baseName = $baseName.Substring(0, $baseName.Length - 5)
+        }
         $ext = [System.IO.Path]::GetExtension($RealVideoPath)
         $OutputFile = "$baseName`_subs$ext"
     }
-    # Ensure Output is absolute path
     $OutputFile = [System.IO.Path]::GetFullPath($OutputFile)
 
-    # 3. COUNT STREAMS (FFPROBE)
-    try {
-        # Use quoted path for ffprobe
-        $existingStreams = ffprobe -v error -select_streams s -show_entries stream=index -of csv=p=0 "$RealVideoPath" 2>$null
-        
-        if ($null -eq $existingStreams) { $streamCount = 0 }
-        elseif ($existingStreams -is [array]) { $streamCount = $existingStreams.Count }
-        else { $streamCount = 1 }
-    } catch {
-        Write-Host "⚠ Warning: Could not count streams. Assuming 0 existing subs." -ForegroundColor Yellow
-        $streamCount = 0
-    }
+    # 3. FIX ENCODING (ROBUST NET FRAMEWORK METHOD) ---------------------
+    Write-Host "⟳ Normalizando subtítulos a UTF-8 con BOM..." -ForegroundColor DarkGray
+    $TempSub = [System.IO.Path]::GetTempFileName()
     
-    $newStreamIndex = $streamCount
+    try {
+        # Leemos todo el texto. Si no se especifica encoding, .NET intenta detectar.
+        # A veces los SRT vienen en ANSI (Windows-1252).
+        $Content = [System.IO.File]::ReadAllText($RealSubPath)
+        
+        # Forzamos escritura en UTF-8 con BOM (Byte Order Mark), que es lo que aman las TVs.
+        $Utf8WithBom = new-object System.Text.UTF8Encoding $true
+        [System.IO.File]::WriteAllText($TempSub, $Content, $Utf8WithBom)
+        
+        # Renombramos a .srt para que ffmpeg no se queje
+        $TempSubSrt = "$TempSub.srt"
+        Move-Item -Path $TempSub -Destination $TempSubSrt -Force
+        $TempSub = $TempSubSrt
+        
+    } catch {
+        Write-Host "⚠ Error en conversión UTF-8: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "  -> Usando subtítulo original (puede fallar en TV)." -ForegroundColor Yellow
+        $TempSub = $RealSubPath
+    }
+    # -------------------------------------------------------------------
 
-    # 4. STATUS DISPLAY
-    Write-Host "`n========================================" -ForegroundColor Cyan
-    Write-Host "  SMART MUX (Tracks detected: $streamCount)" -ForegroundColor Cyan
-    Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host "Video:  $RealVideoPath"
-    Write-Host "Subs:   $RealSubPath"
-    Write-Host "Target: Stream Index #$newStreamIndex" 
-    Write-Host "----------------------------------------" -ForegroundColor DarkGray
+    # 4. STREAM COUNT
+    $existingStreams = ffprobe -v error -select_streams s -show_entries stream=index -of csv=p=0 "$RealVideoPath" 2>$null
+    $streamCount = if ($existingStreams) { 
+        ($existingStreams -split "`r`n").Count 
+    } else { 0 }
+    
+    # Ajuste por si devuelve array vacío
+    if ($streamCount -eq $null) { $streamCount = 0 }
+
+    Write-Host "• Muxing: $(Split-Path $RealVideoPath -Leaf) + Subtítulos" -ForegroundColor Cyan
 
     # 5. EXECUTE FFMPEG
     $process = Start-Process -FilePath "ffmpeg" -ArgumentList `
         "-i `"$RealVideoPath`"", `
-        "-i `"$RealSubPath`"", `
+        "-i `"$TempSub`"", `
         "-map 0", `
         "-map 1", `
         "-c copy", `
-        "-metadata:s:s:$newStreamIndex language=$Language", `
-        "-metadata:s:s:$newStreamIndex title=`"$Title`"", `
+        "-metadata:s:s:$streamCount language=$Language", `
+        "-metadata:s:s:$streamCount title=`"$Title`"", `
+        "-disposition:s:s:$streamCount default", `
         "`"$OutputFile`"" `
         -Wait -NoNewWindow -PassThru
 
+    # 6. CLEANUP
+    if ($TempSub -ne $RealSubPath -and (Test-Path $TempSub)) { Remove-Item $TempSub }
+
     if ($process.ExitCode -eq 0) {
-        Write-Host "`n✓ Success! New file: $OutputFile" -ForegroundColor Green
+        Write-Host "✓ Listo: $(Split-Path $OutputFile -Leaf)" -ForegroundColor Green
     } else {
-        Write-Host "`n✗ Error: FFmpeg exited with code $($process.ExitCode)" -ForegroundColor Red
+        Write-Host "✗ Error FFmpeg: $($process.ExitCode)" -ForegroundColor Red
     }
 }
-
 Set-Alias -Name subs -Value MuxSubs
 
-
-
 # --- AUTO-UPDATE SCOOP CONFIG ---
-$RepoPath = $PSScriptRoot
-$ScoopFile = Join-Path $RepoPath "scoop_apps.json"
+# $RepoPath = $PSScriptRoot
+# $ScoopFile = Join-Path $RepoPath "scoop_apps.json"
 
-if (Test-Path $RepoPath) {
-    $LastUpdate = if (Test-Path $ScoopFile) { (Get-Item $ScoopFile).LastWriteTime } else { [DateTime]::MinValue }
+# if (Test-Path $RepoPath) {
+#     $LastUpdate = if (Test-Path $ScoopFile) { (Get-Item $ScoopFile).LastWriteTime } else { [DateTime]::MinValue }
     
-    if ((Get-Date) -gt $LastUpdate.AddDays(7)) {
-        Write-Host "Actualizando lista de apps de Scoop (Backup semanal)..." -ForegroundColor DarkGray
-        try {
-            scoop export | Out-File $ScoopFile -Encoding utf8 -Force
-            # Opcional: Auto-commit 
-            git -C $RepoPath commit -am "Auto-update: scoop apps list" | Out-Null
-        } catch {
-            Write-Host "Error actualizando backup de Scoop." -ForegroundColor Red
-        }
-    }
-}
+#     if ((Get-Date) -gt $LastUpdate.AddDays(7)) {
+#         Write-Host "Actualizando lista de apps de Scoop (Backup semanal)..." -ForegroundColor DarkGray
+#         try {
+#             scoop export | Out-File $ScoopFile -Encoding utf8 -Force
+#             # Opcional: Auto-commit 
+#             git -C $RepoPath commit -am "Auto-update: scoop apps list" | Out-Null
+#         } catch {
+#             Write-Host "Error actualizando backup de Scoop." -ForegroundColor Red
+#         }
+#     }
+# }
