@@ -1,96 +1,115 @@
-# PowerShell + Scoop Backup
+# PowerShell + Scoop + Windows Terminal Backup
 
-> El objetivo principal de este repositorio es Backup de la configuración personal de PowerShell y las aplicaciones de Scoop que utilizo, para facilitar la reinstalación después de formatear la PC en windows.
+> Backup de configuración personal de PowerShell, aplicaciones de Scoop y Windows Terminal para facilitar la reinstalación después de formatear Windows.
 
 ## Componentes
 
-- `Microsoft.PowerShell_profile.ps1`  
-  El perfil de PowerShell con funciones de automatización (whisperx, yt-dlp, ffmpeg) y configuración del entorno (oh-my-posh, terminal-icons, psreadline, autocompletado).
+| Archivo | Descripción |
+|---------|-------------|
+| `Microsoft.PowerShell_profile.ps1` | Perfil de PowerShell con funciones de automatización y configuración del entorno |
+| `scoop_apps.json` | Lista de aplicaciones y buckets de Scoop (auto-actualizable) |
+| `setup_scoop.ps1` | Script de restauración de Scoop con GUI de selección |
+| `settings.json` | Configuración de Windows Terminal (temas, fuentes, perfiles) |
+| `setup_terminal.ps1` | Script que restaura la configuración de Windows Terminal |
+| `open_dev_layout.ps1` | Abre Windows Terminal con layout de 3 paneles |
+| `install_dependencies.ps1` | Instala módulos de PowerShell requeridos |
+| `powershell.config.json` | Política de ejecución |
 
-- `scoop_apps.json`  
-  Lista de aplicaciones y buckets de Scoop exportada, que se actualiza automáticamente cada semana.
-  > ESTO ESTÁ COMENTADO POR DEFECTO: DESCOMENTAR SI SE ESTÁ EN LA PC PRINCIPAL.
+> **Nota:** La actualización automática de la lista de aplicaciones en scoop está comentada por defecto: **descomentar si se está en la máquina principal**.
 
-- `setup_scoop.ps1`  
-  Script de restauración que instala Scoop, añade los buckets y permite con interfaz seleccionar qué aplicaciones reinstalar de la lista.
-
-- `powershell.config.json`  
-  Configuración de la política de ejecución.
-
-## Flujos
-
-### Flujo de auto-actualización
-
-El perfil tiene un bloque al final que verifica si `scoop_apps.json` tiene más de 7 días y, si es así, ejecuta `scoop export` y hace auto-commit.
-Por defecto está comentado. Descomentar si estás en la pc principal.
-
-### Flujo de restauración
-
-En una PC nueva, se clona el repositorio, se ejecuta `setup_scoop.ps1` para restaurar las apps de Scoop, se instalan los módulos de PowerShell ejecutando `install_dependencies.ps1` y se copia el perfil a `$PROFILE`.  
-Reiniciar terminal.
-
-
-## Restauración
-
-### 1. Clonar repositorio 
-**Opcional: clonar en carpeta de configuración por defecto:**
-Idealmente el repositorio debe clonarse **directamente** en la carpeta estándar de perfiles de PowerShell. Esto permite que el sistema cargue el perfil automáticamente sin pasos extra.
+## Restauración rápida
 
 ```powershell
-# Asegura que el directorio existe (o se crea)
+# 1. Clonar en la carpeta de PowerShell
 $TargetDir = "$HOME\Documents\PowerShell"
 New-Item -ItemType Directory -Path $TargetDir -Force
-
-# Ubica en el directorio y clona ('.' es para no crear una subcarpeta)
 Set-Location $TargetDir
 git clone https://github.com/gabrielsoda/windows-dotfiles.git .
-```
 
-### 2. Scoop + Apps
-
-```powershell
+# 2. Scoop + Apps
 .\setup_scoop.ps1
-```
 
-Instala Scoop (si no existe), añade buckets y reinstala las apps listadas.
-
-### 3. Módulos PowerShell
-
-```powershell
+# 3. Módulos PowerShell
 .\install_dependencies.ps1
+
+# 4. Perfil de PowerShell
+Copy-Item .\Microsoft.PowerShell_profile.ps1 $PROFILE -Force
+
+# 5. Windows Terminal
+.\setup_terminal.ps1
+
+# 6. Reiniciar terminal
 ```
 
-### 4. Perfil de PowerShell
+## Windows Terminal
+
+### Perfiles incluidos
+
+El `settings.json` incluye estos perfiles:
+
+| Perfil | Descripción |
+|--------|-------------|
+| PowerShell | PowerShell 7+ (default) |
+| Windows PowerShell | PowerShell 5.1 legacy |
+| Ubuntu | WSL Ubuntu |
+| SSH Server | Conexión a `gsoda@192.168.1.38` |
+| WSL Home | WSL Ubuntu iniciando en `~` |
+
+### Layout de 3 paneles
+
+Para abrir una ventana con los 3 entornos (host + servidor + WSL):
 
 ```powershell
-Copy-Item .\Microsoft.PowerShell_profile.ps1 $PROFILE -Force
+.\open_dev_layout.ps1
 ```
 
-Reiniciar terminal.
+Layout resultante:
+```
+┌─────────────────┬─────────────────┐
+│   PowerShell    │                 │
+│    (host)       │                 │
+├─────────────────┤    SSH Server   │
+│   WSL Home      │                 │
+│    (Ubuntu)     │                 │
+└─────────────────┴─────────────────┘
+```
 
-## Dependencias
+Layouts alternativos:
+```powershell
+.\open_dev_layout.ps1 -Layout columns  # 3 columnas horizontales
+.\open_dev_layout.ps1 -Layout rows     # 3 filas verticales
+```
 
-El perfil requiere:
+### Atajo de teclado (opcional)
 
-- PowerShell 7+
-- `oh-my-posh`, `Terminal-Icons`, `PSReadLine` (módulos)
-- `ffmpeg`, `ffprobe`, `yt-dlp`, `uv` (en PATH, instalables via Scoop)
-- Entorno virtual con `whisperx` en `C:\Users\Gabi\whisperx-env` (para funciones `wtxt`/`wyt`)
-> **Nota:** La ruta del entorno virtual está hardcodeada en `C:\Users\Gabi\whisperx-env`. Modificar la variable `$envPath` en la función `WhisperTxt` según corresponda.
-## Funciones disponibles integradas en el perfil de PowerShell
+Para crear un atajo con hotkey:
+
+1. Click derecho en `open_dev_layout.ps1` → Crear acceso directo
+2. Mover el acceso directo a `shell:startup` o al escritorio
+3. Click derecho en el acceso directo → Propiedades
+4. En "Destino", poner:
+   ```
+   pwsh -WindowStyle Hidden -File "C:\Users\Gabi\Documents\PowerShell\open_dev_layout.ps1"
+   ```
+5. En "Tecla de método abreviado", asignar combinación (ej: `Ctrl+Alt+T`)
+6. Aceptar
+
+## Funciones del perfil
 
 ### Transcripción (WhisperX)
 
 | Comando | Descripción |
 |---------|-------------|
 | `wtxt <archivos>` | Transcribe audio a `.txt` (modelo large-v3, español) |
+Comando real ejecutado:
+> `whisperx $AudioFiles --model large-v3 --language es --output_format txt`
 
 ### YouTube
 
 | Comando | Descripción |
 |---------|-------------|
 | `wyt <urls>` | Descarga audio, transcribe, elimina audio |
-| `wyt2 <urls>` | Igual que `wyt` pero usa nombres temporales (evita errores con títulos raros) |
+| `wyt2 <urls>` | Igual que `wyt` pero usa nombres temporales |
 | `ytd <urls>` | Descarga video en mejor calidad (MP4) |
 | `yt <urls>` | Alternativa al anterior |
 
@@ -100,7 +119,15 @@ El perfil requiere:
 |---------|-------------|
 | `subs <video> <srt> [output] [lang] [title]` | Muxea subtítulos en video sin recodificar |
 
-## Notas de configuración del script de actualización automática de las aplicaciones en scoop:
+## Auto-actualización de Scoop
 
-* **PC Principal (Master):** Para activar el backup semanal automático de aplicaciones, abrir `$PROFILE` y **descomentar** el bloque final ("AUTO-UPDATE SCOOP CONFIG").
-* **Ruta dinámica:** El perfil detecta automáticamente su ubicación (`$PSScriptRoot`), por lo que la auto-actualización funciona sin ajustar rutas manuales.
+El perfil tiene un bloque (comentado por defecto) que verifica semanalmente si `scoop_apps.json` necesita actualizarse.
+
+**Para activar en la PC principal:** Descomentar el bloque "AUTO-UPDATE SCOOP CONFIG" al final del `$PROFILE`.
+
+## Dependencias
+
+- PowerShell 7+
+- Módulos: `oh-my-posh`, `Terminal-Icons`, `PSReadLine`
+- CLI: `ffmpeg`, `yt-dlp`, `uv` (en PATH, instalables via Scoop)
+- Entorno virtual con `whisperx` en `C:\Users\Gabi\whisperx-env` (ajustar ruta si es necesario) para funciones `wtxt`/`wyt`.
