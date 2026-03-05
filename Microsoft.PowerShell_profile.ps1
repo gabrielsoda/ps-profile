@@ -87,7 +87,7 @@ function WhisperTxt {
         Write-Host "Error: Debes proporcionar al menos un archivo de audio." -ForegroundColor Red
         return
     }
-    whisperx $AudioFiles --model large-v3 --language es --output_format txt
+    whisperx $AudioFiles --model large-v3 --output_format txt #--language es
     
     # Desactiva el venv después
     deactivate
@@ -371,26 +371,20 @@ function MuxSubs {
 
     # 4. STREAM COUNT
     $existingStreams = ffprobe -v error -select_streams s -show_entries stream=index -of csv=p=0 "$RealVideoPath" 2>$null
-    $streamCount = if ($existingStreams) { 
-        ($existingStreams -split "`r`n").Count 
+    $streamCount = if ($existingStreams) {
+        @($existingStreams -split "`n" | Where-Object { $_.Trim() -ne "" }).Count
     } else { 0 }
-    
-    # Ajuste por si devuelve array vacío
-    if ($streamCount -eq $null) { $streamCount = 0 }
 
-    Write-Host "• Muxing: $(Split-Path $RealVideoPath -Leaf) + Subtítulos" -ForegroundColor Cyan
+    Write-Host "• Muxing: $(Split-Path $RealVideoPath -Leaf) + Subtítulos ($streamCount subs existentes)" -ForegroundColor Cyan
 
     # 5. EXECUTE FFMPEG
-    $process = Start-Process -FilePath "ffmpeg" -ArgumentList `
-        "-i `"$RealVideoPath`"", `
-        "-i `"$TempSub`"", `
-        "-map 0", `
-        "-map 1", `
-        "-c copy", `
-        "-metadata:s:s:$streamCount language=$Language", `
-        "-metadata:s:s:$streamCount title=`"$Title`"", `
-        "-disposition:s:s:$streamCount default", `
-        "`"$OutputFile`"" `
+    $ffArgs = "-i `"$RealVideoPath`" -i `"$TempSub`" -map 0 -map 1 -c copy " +
+              "-metadata:s:s:$streamCount language=$Language " +
+              "-metadata:s:s:$streamCount title=`"$Title`" " +
+              "-disposition:s:s:$streamCount default " +
+              "`"$OutputFile`""
+
+    $process = Start-Process -FilePath "ffmpeg" -ArgumentList $ffArgs `
         -Wait -NoNewWindow -PassThru
 
     # 6. CLEANUP
