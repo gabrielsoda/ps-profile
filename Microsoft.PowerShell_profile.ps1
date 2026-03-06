@@ -398,6 +398,12 @@ function MuxSubs {
 }
 Set-Alias -Name subs -Value MuxSubs
 
+# Procesar clases TUIA: transcribir videos y generar notas en Obsidian
+function ProcesarClases {
+    uv run "C:\Users\Gabi\Proyectos\tuia-procesar-clases\procesar_clases.py"
+}
+Set-Alias -Name pc -Value ProcesarClases
+
 # --- AUTO-UPDATE SCOOP CONFIG ---
 $RepoPath = $PSScriptRoot
 $ScoopFile = Join-Path $RepoPath "scoop_apps.json"
